@@ -27,6 +27,7 @@ Packages listed in requirements.txt:
 - langchain-huggingface
 - langchain-chroma
 - sentence-transformers
+- streamlit-mic-recorder
 
 ---
 
@@ -35,3 +36,8 @@ Packages listed in requirements.txt:
 - You’ll need a Groq API key to run the chatbot.
 
 ---
+
+
+## New Features added 🛠️
+-TTS & STT
+-Web Scraping

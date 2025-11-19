@@ -1,6 +1,6 @@
 import streamlit as st
 from main import chat, pool, create_session, load_history, save_message, generate_session_name , delete_all_data
-from retriever import get_context
+from retriever import get_context,add_pdf_or_docx_to_vector_db
 from prompts import SYSTEM_PROMPT
 from streamlit_mic_recorder import mic_recorder
 from speech_to_text import transcribe_audio  # imported our custom function for STT
@@ -8,6 +8,29 @@ from text_to_speech import text_to_speech  # imported our custom function for TT
 import tempfile  # for saving audio bytes to temporary file
 import os #for deleting temp files
 
+
+# ---------------- Login ----------------
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "role" not in st.session_state:
+    st.session_state.role = None
+
+if not st.session_state.logged_in: #if user is not logged in
+    st.title("Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    role = st.radio("Role", ["HR", "Finance", "Other"])
+    
+    if st.button("Login"):
+        if username == "username" and password == "password":
+            st.session_state.logged_in = True
+            st.session_state.role = role
+            st.rerun() #causes the script to rerun from the top
+        else:
+            st.error("Invalid credentials")
+    st.stop() #prevents the below code from appearing if not logged in
+
+role = st.session_state.role
 
 # ---------------- Initialize state ----------------
 if "session_id" not in st.session_state:
@@ -20,7 +43,7 @@ if "mic_counter" not in st.session_state:
 # ---------------- Sidebar ----------------
 with st.sidebar:
     st.title("LangChain with Groq API Example")
-    st.markdown("**RDR2 GuideBot**")
+    st.markdown(f"**Role:** {role}")
 
     website_url = st.text_input("🌐 Optional: Enter a website URL to include in context").strip() or None
     #################################################### Creating button to add website data to vector db ##############
@@ -33,6 +56,28 @@ with st.sidebar:
         st.success("Website data added to vector database ✅")
     ####################################################
 
+    # PDF Upload
+    st.markdown("### Upload PDF")
+    uploaded_files = st.file_uploader("Upload PDFs", type=["pdf", "docx"], accept_multiple_files=True)
+    if uploaded_files:
+        for file in uploaded_files:
+            tag = st.radio(                 #lets user select tag for the uploaded pdf
+            f"Select tag for {file.name}", 
+            options=["HR", "Finance", "Other"], 
+            key=f"tag_{file.name}"
+            )
+            if st.button(f"Upload {file.name}", key=f"upload_{file.name}"):
+                file_ext = file.name.split(".")[-1].lower() #get the file extension (pdf or docx)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_ext}") as tmp:
+                    tmp.write(file.read()) #writes the content of the uploaded pdf to the temp file
+                    tmp_path = tmp.name #tmp.name is the path of the temp file
+                print(f"\n\n====File.name====\n\n{file.name}\n\n====file.name====\n\n")
+                from retriever import add_pdf_or_docx_to_vector_db
+                with st.spinner("Adding to vector database...", show_time=True):
+                    add_pdf_or_docx_to_vector_db(tmp_path, tag, file.name)
+                    st.success(f"{file.name} added to vector database with tag '{tag}'")
+                    os.unlink(tmp_path) #delete temp file once its added to vector db 
+
 
 
     if st.button("➕ New Chat"):
@@ -43,7 +88,7 @@ with st.sidebar:
 
     if st.button("🗑️ Delete All History"):
         delete_all_data()
-        
+
     audio = mic_recorder(
     start_prompt="🎙️",
     stop_prompt="⏹️",
@@ -139,13 +184,12 @@ if prompt:
         pool.release_conn(conn)
         st.session_state.is_new_session = False
 
-    with st.spinner("Retrieving context..."):
-        context = get_context(prompt)
-
-    system_message = SYSTEM_PROMPT.format(rag_context=context)
-
+    # RAG
+    with st.spinner("Retrieving contex..."):
+        context, sources = get_context(prompt, role=role)   #✅ Retrieval Step: Finds relevant knowledge
+    system = SYSTEM_PROMPT.format(rag_context=context) #✅ Generation prep Step: Injects retrieved context into system prompt
     with st.spinner("Generating response..."):
-        response = chat(session_id, system_message, prompt)
+        response = chat(session_id, system, prompt)        #✅ Generation Step: LLM generates answer using system prompt + user prompt
 
     # 🗣️ Convert response to audio first
     audio_file_path = text_to_speech(response)
@@ -153,12 +197,19 @@ if prompt:
     # 💾 Save both text + audio path
     save_message(session_id, "assistant", response, audio_file_path)
 
-    # 💬 Display text and play audio
+    # 💬 Display text
     st.chat_message("assistant").write(response)
+
+    #show sources if any
+    if sources:          #sources is a list eg: ["file1.pdf - page 2", "file2.pdf - page 5"]
+        with st.expander("Sources used"):
+            for source in sources:  #ka matlab hai list ka har item alag alag iterate hoga.
+                st.write(source)
+
+    # 🔊 Play audio
     if audio_file_path and os.path.exists(audio_file_path):
         st.audio(audio_file_path)
 
     st.session_state.mic_counter += 1  # Increment to force new recorder
-
 
 

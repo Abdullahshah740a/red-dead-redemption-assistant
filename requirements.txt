@@ -8,5 +8,6 @@ langchain-chroma
 sentence-transformers
 
 streamlit-mic-recorder  #to record live audio from the mic  #issue: streamlit_mic_recorder caches audio in session state and never clears it — so st.rerun() triggers the same input forever.
-
-
+pypdf
+langchain-text-splitters #used for chunking of content
+docx2pdf            #to convert docx to pdf on windows

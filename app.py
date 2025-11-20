@@ -9,6 +9,7 @@ import tempfile  # for saving audio bytes to temporary file
 import os #for deleting temp files
 
 
+
 # ---------------- Login ----------------
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -79,6 +80,37 @@ with st.sidebar:
                     os.unlink(tmp_path) #delete temp file once its added to vector db 
 
 
+    # ---------------- Sidebar: Image Upload ----------------
+    st.sidebar.markdown("### Upload an image for next chat prompt")
+    uploaded_images = st.sidebar.file_uploader(
+        "Upload image(s) – max 5 at once", 
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=True, 
+        key="sidebar_image_upload",
+        help="Maximum 5 images allowed (model limit)"
+        )
+
+    if uploaded_images:
+        if len(uploaded_images) > 5:
+            st.sidebar.error("⚠️ Maximum 5 images allowed at once. Extra images will be ignored.")
+
+        uploaded_images = uploaded_images[:5]  # sirf pehle 5 hi rakho
+        image_paths = []
+        for uploaded_image in uploaded_images:
+            image_ext = uploaded_image.name.split(".")[-1].lower() # .jpg ya .png nikala
+            temp_image = tempfile.NamedTemporaryFile(delete=False, suffix=f".{image_ext}")
+            temp_image.write(uploaded_image.read())
+            temp_image.close()
+            image_paths.append(temp_image.name)
+
+        # Save list of paths in session state
+        st.session_state.uploaded_images = image_paths  # plural
+        st.sidebar.success(f"{len(image_paths)} image(s) ready for next chat prompt")
+
+
+
+    # ---------------- Session Management Sidebar ----------------
+
 
     if st.button("➕ New Chat"):
         # Just mark that a new chat is being started
@@ -136,7 +168,6 @@ if st.session_state.session_id:  # history will not load if session_id is None
 
 prompt = st.chat_input("Say something")
  
- 
 if audio:
 
     # Save audio bytes to a temporary file
@@ -184,12 +215,26 @@ if prompt:
         pool.release_conn(conn)
         st.session_state.is_new_session = False
 
-    # RAG
-    with st.spinner("Retrieving contex..."):
-        context, sources = get_context(prompt, role=role)   #✅ Retrieval Step: Finds relevant knowledge
-    system = SYSTEM_PROMPT.format(rag_context=context) #✅ Generation prep Step: Injects retrieved context into system prompt
-    with st.spinner("Generating response..."):
-        response = chat(session_id, system, prompt)        #✅ Generation Step: LLM generates answer using system prompt + user prompt
+    # ---------------- Check if an image was uploaded in sidebar ----------------
+    image_paths = st.session_state.get("uploaded_images")  # list ya None if no image uploaded
+
+    if image_paths:
+        from vision import analyze_image
+        response = analyze_image(image_paths, user_prompt=prompt)  # ab list jaayegi
+        sources = []
+        # Saare temp image files delete kar do
+        for path in image_paths:
+            if os.path.exists(path):
+                os.unlink(path)
+        if "uploaded_images" in st.session_state:
+            del st.session_state.uploaded_images
+    else:
+        # RAG
+        with st.spinner("Retrieving contex..."):
+            context, sources = get_context(prompt, role=role)   #✅ Retrieval Step: Finds relevant knowledge
+        system = SYSTEM_PROMPT.format(rag_context=context) #✅ Generation prep Step: Injects retrieved context into system prompt
+        with st.spinner("Generating response..."):
+            response = chat(session_id, system, prompt)        #✅ Generation Step: LLM generates answer using system prompt + user prompt
 
     # 🗣️ Convert response to audio first
     audio_file_path = text_to_speech(response)
@@ -211,5 +256,4 @@ if prompt:
         st.audio(audio_file_path)
 
     st.session_state.mic_counter += 1  # Increment to force new recorder
-
 
